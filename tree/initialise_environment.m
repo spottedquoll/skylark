@@ -28,7 +28,7 @@ function meta = initialise_environment(options)
     end
     meta.save_dir = save_dir;
 
-    conc_dir = [options.env.comtrade_path 'concordances/'];
+    conc_dir = [options.env.comtrade_dir 'concordances/'];
     assert(isfolder(conc_dir));
     
     meta.conc_dir = conc_dir;
