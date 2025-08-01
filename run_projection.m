@@ -286,7 +286,7 @@ for t = min(timeseries) : max(timeseries)
         % Write tensor to disk
         disp('  writing to disk...');
     
-        fname = [object_dir 'comtrade-vals-weight-tensor-' num2str(t) '.mat'];
+        fname = [object_dir 'comtrade-tensor-hscpc-' num2str(t) '.mat'];
         save(fname, 'trade_tensor');
 
     end
