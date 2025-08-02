@@ -18,14 +18,20 @@ save_dir = meta.save_dir;
 flows = {'Import', 'Export'};
 timeseries = options.timeseries;
 comtrade_dir = options.env.comtrade_dir;
+base_classification = 'HS17';
 
+% Stores
+hs_prematch = zeros(1,2+length(hs_2017_commodities));
+all_missing_cs = [];
+
+% Unpack by year
 for t = min(timeseries) : max(timeseries)
 
     disp(['.unpacking ' num2str(t) '...']);
 
     % Read from cache or build from scratch
-    fname = [save_dir 'comtrade-tensor-hscpc' num2str(t) '.mat'];
-    if isfile(fname)
+    save_fname = [save_dir 'comtrade-tensor-' base_classification '-' num2str(t) '.mat'];
+    if isfile(save_fname)
     
         disp([' skipping ' num2str(t) '.']); 
     
@@ -63,6 +69,8 @@ for t = min(timeseries) : max(timeseries)
         hs_2017_commodities = unique(hs_version_conc(:,stable_2017_col));
     
         [~,~,hs_version_year] = xlsread([conc_dir '/hs_version_year.xlsx']);
+
+        missing_cs = {};
     
         % Define column names 
         col_names = [{'classificationCode', 'hs_version'}; ...
@@ -71,6 +79,7 @@ for t = min(timeseries) : max(timeseries)
             {'partnerCode', 'partner_code'}; ...
             {'netWgt', 'weight'}; ...
             {'FOBValue', 'value_fob'}; ...
+            {'CIFValue', 'value_cif'}; ...
             {'flowCode', 'flow'}; ...
         ];
     
@@ -86,9 +95,11 @@ for t = min(timeseries) : max(timeseries)
         % Filter records
         n_raw = size(trade,1);
     
-        a = intersect(find(~isnan(cell2mat(trade(:,col_idx.value_fob)))),find(~isnan(cell2mat(trade(:,col_idx.weight)))));
+        tmp = cell2mat(trade(:,[col_idx.value_fob col_idx.value_cif col_idx.weight]));
+
+        a = union(union(find(~isnan(tmp(:,1))), find(~isnan(tmp(:,2)))), find(~isnan(tmp(:,3))));
         b = union(find(strcmp(trade(:,col_idx.flow),'X')),find(strcmp(trade(:,col_idx.flow),'M')));
-        c = intersect(find(cell2mat(trade(:,col_idx.value_fob)) > 0),find(cell2mat(trade(:,col_idx.weight)) > 0));
+        c = union(union(find(tmp(:,1) > 0), find(tmp(:,2) > 0)), find(tmp(:,3) > 0));
         d = intersect(intersect(a,b),c);
     
         e = find(ismember(header,col_names(:,1)));
@@ -96,9 +107,9 @@ for t = min(timeseries) : max(timeseries)
         trade = trade(d,e);
         header = header(e);
     
-        clear a b c d e
+        clear a b c d e tmp
     
-        disp(['  discovered ' thousands_separated(size(trade,1)) ' records with weight and value (' num2str(round(size(trade,1)/n_raw*10000)/100) '%)']);
+        disp(['  discovered ' thousands_separated(size(trade,1)) ' valid records (' num2str(round(size(trade,1)/n_raw*10000)/100) '%)']);
         
         % Re-index column names
         col_idx = struct();
@@ -120,8 +131,6 @@ for t = min(timeseries) : max(timeseries)
     
         subs = zeros(guess_size,size(edge_dims,2)); 
         vals = zeros(guess_size,2); 
-    
-        hs_match_store = [0 0];
     
         % Extract each line
         j = 1; logging = round(linspace(1,n_records,40));
@@ -165,25 +174,29 @@ for t = min(timeseries) : max(timeseries)
                 assert(~isempty(flow_idx));
     
                 new_entry(4) = flow_idx;
+
+                % Classification year
+                hs_year_match = hs_version_year(find(strcmp(hs_version_year(:,1),row(col_idx.hs_version))),2);
+                hs_year = num2str(cell2mat(hs_year_match));
+                assert(~isempty(hs_year));
     
                 % Interpret HS commodity code
                 raw_hs_code = row{col_idx.commodity_code};
                 
-                preindexed = find(hs_match_store(:,1) == raw_hs_code,1,'first');
+                preindexed = intersect(find(hs_prematch(:,1) == str2double(hs_year)), find(hs_prematch(:,2) == raw_hs_code));
                 if ~isempty(preindexed)
-                    commodity_idx_hs6 = hs_match_store(preindexed,2);
+                    c_idx_hs6 = find(hs_prematch(preindexed,3:end));
+                    assert(length(preindexed) == 1);
                 else
+
+                    c_idx_hs6 = [];
                     
-                    % Format
+                    % Format HS code
                     hs6_code = num2str(row{col_idx.commodity_code});
                     if length(hs6_code) < 6; hs6_code = ['0' hs6_code]; end
                     assert(length(hs6_code) == 6);
                     
-                    % Cast all commodity codes to HS 2017
-                    hs_year_match = hs_version_year(find(strcmp(hs_version_year(:,1),row(col_idx.hs_version))),2);
-                    hs_year = num2str(cell2mat(hs_year_match));
-                    assert(~isempty(hs_year));
-        
+                    % Cast commodity codes to HS 2017
                     hs_conc_col = find(strcmp(vs_header,['HS' hs_year(3:end)]));
                     hs_conc_row = find(strcmp(hs_version_conc(:,hs_conc_col), hs6_code));
         
@@ -195,59 +208,93 @@ for t = min(timeseries) : max(timeseries)
                         end
                     end
     
-                    if isempty(hs_conc_row) || isempty(hs_conc_col)
-                        disp(['Could not match: ' hs6_code]);
-                        commodity_idx_hs6 = [];
-                    else
+                    % Was an HS match possible
+                    if ~isempty(hs_conc_row) && ~isempty(hs_conc_col)
                         
-                        hs_2017_match = unique(hs_version_conc(hs_conc_row,stable_2017_col));
-                        if size(hs_2017_match,1) > 1; hs_2017_match = hs_2017_match(1); end
-            
-                        commodity_idx_hs6 = find(strcmp(hs_2017_commodities,char(hs_2017_match)));
-                        assert(~isempty(commodity_idx_hs6) && length(commodity_idx_hs6) == 1);
+                        hs17_match = unique(hs_version_conc(hs_conc_row,stable_2017_col));
+                        for k = 1:size(hs17_match,1)
+
+                            match = hs17_match(k);
     
-                        hs_match_store = [hs_match_store; [raw_hs_code commodity_idx_hs6]];
-    
+                            c_idx_hs6_k = find(strcmp(hs_2017_commodities, char(match)));
+                            assert(~isempty(c_idx_hs6_k) && length(c_idx_hs6_k) == 1);
+
+                            c_idx_hs6 = [c_idx_hs6 c_idx_hs6_k];
+                        
+                        end                        
                     end
-    
+
+                    % Save match
+                    if ~isempty(c_idx_hs6)
+                        assert(no_duplicates(c_idx_hs6));
+                        zs = zeros(1,length(hs_2017_commodities));
+                        zs(c_idx_hs6) = 1;
+                        hs_prematch = [hs_prematch; [str2double(hs_year) raw_hs_code zs]];  
+                    end
+
                 end
+
+                % Write record
+                if isempty(c_idx_hs6)
+                    missing_cs = [missing_cs; [hs6_code ' (' row{col_idx.hs_version} ')']];
+                else
+
+                    n_matches = size(c_idx_hs6,1);
+
+                    for k = 1:n_matches
+
+                        % Write HS index
+                        new_entry(3) = c_idx_hs6(k);
+        
+                        % Populate new record                    
+                        if strcmp(fl,'Import')
+                            new_entry(1) = partner_idx;
+                            new_entry(2) = reporter_idx;
+                        elseif strcmp(fl,'Export')
+                            new_entry(1) = reporter_idx;
+                            new_entry(2) = partner_idx;
+                        end
+        
+                        % Weight (kg)
+                        if row{col_idx.weight} > 0
+                            
+                            weight = row{col_idx.weight};
+                            assert(~isnan(weight) && isfinite(weight) && weight > 0);
     
-                if ~isempty(commodity_idx_hs6)
+                            vals(j,2) = weight/n_matches;
     
-                    % Write HS index
-                    new_entry(3) = commodity_idx_hs6;
+                        end
+                        
+                        % Value
+                        if row{col_idx.value_fob} > 0 || row{col_idx.value_cif} > 0 
     
-                    % Populate new record                    
-                    if strcmp(fl,'Import')
-                        new_entry(1) = partner_idx;
-                        new_entry(2) = reporter_idx;
-                    elseif strcmp(fl,'Export')
-                        new_entry(1) = reporter_idx;
-                        new_entry(2) = partner_idx;
+                            candidates = [row{col_idx.value_fob} row{col_idx.value_cif}];
+                            nt_nan = find(~isnan(candidates));
+                            assert(length(nt_nan) == 1);
+    
+                            value = candidates(nt_nan);
+                            assert(~isnan(value) && isfinite(value) && value > 0);
+    
+                            vals(j,1) = value/n_matches;
+    
+                        end
+        
+                        % Add to store
+                        assert(isempty(find(new_entry == 0, 1)),'Address vector is incomplete');
+                        assert(sum(vals(j,:)) > 0);
+
+                        subs(j,:) = new_entry;
+        
+                        j = j + 1;    
+        
                     end
-    
-                    % Price (and convert to tonnes)
-                    weight = row{col_idx.weight} * (1/1000);
-                    assert(~isnan(weight) && isfinite(weight) && weight > 0);
-                    
-                    value = row{col_idx.value_fob};
-                    assert(~isnan(value) && isfinite(value) && value > 0);
-    
-                    % Add to store
-                    assert(isempty(find(new_entry == 0, 1)),'Address vector is incomplete');
-                    subs(j,:) = new_entry;
-    
-                    vals(j,1) = value;
-                    vals(j,2) = weight;
-    
-                    j = j + 1;    
-    
+
                 end
             end
             
             % Log progress
             if ~isempty(find(logging == i, 1))
-                disp(['Completed ' num2str(round(i/n_records*100)) '%']);
+                disp([' completed ' num2str(round(i/n_records*100)) '%']);
             end
             
             % Check store size
@@ -279,18 +326,32 @@ for t = min(timeseries) : max(timeseries)
         % Save as sparse tensor: {origin, destination, recorded_direction, commodity}
         trade_tensor.value = sptensor(subs,vals(:,1),edge_dims); 
         trade_tensor.weight = sptensor(subs,vals(:,2),edge_dims); 
+
         trade_tensor.meta.edge_dims = edge_dims; 
         trade_tensor.meta.flows = flows;
         trade_tensor.meta.edges = {'origin', 'destination', 'recorded_direction', 'commodity'};
+        trade_tensor.meta.units = {'$', 'kg'};
     
         % Write tensor to disk
         disp('  writing to disk...');
-    
-        fname = [object_dir 'comtrade-tensor-hscpc-' num2str(t) '.mat'];
-        save(fname, 'trade_tensor');
+
+        save(save_fname, 'trade_tensor', '-v7.3');
+
+        % Log missing commodities
+        disp(['Could not match: ' num2str(size(missing_cs,1)) ' records.']);
+        all_missing_cs = [all_missing_cs; unique(missing_cs)];
 
     end
 
 end
+
+% Write unmatched HS codes
+fname = [save_dir 'unmatched-hs-code.mat'];
+save(fname,'all_missing_cs');
+
+% Write matches shortcut
+fname = [conc_dir 'all-hs-matches.mat'];
+hs_match_conc = hs_prematch;
+save(fname,'hs_match_conc');
 
 disp('Complete.');
