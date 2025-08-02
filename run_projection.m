@@ -20,6 +20,28 @@ timeseries = options.timeseries;
 comtrade_dir = options.env.comtrade_dir;
 base_classification = 'HS17';
 
+% Country concordances
+[~,~,countries_iso_numeric] = xlsread([conc_dir '/countries-iso-numeric-m49-conc.xlsx']);
+iso_code = cell2mat(countries_iso_numeric(2:end,2));
+iso_alpha = countries_iso_numeric(2:end,3);
+
+[~,~,countries_iso_numeric] = xlsread([conc_dir '/reporters.xlsx']);
+iso_code = cell2mat(countries_iso_numeric(2:end,3));
+iso_alpha = countries_iso_numeric(2:end,7);
+
+country_acronyms = meta.root_country_legend(2:end,2);
+assert(size(country_acronyms,1) == meta.n_reg_root_gl);
+
+% HS concordances
+[~,~,hs_version_conc] = xlsread([conc_dir '/HS-SITC-BEC_Correlations_2022_bis.xlsx']);
+
+vs_header = hs_version_conc(1,1:7);
+hs_version_conc = hs_version_conc(2:end-2,1:7);
+stable_2017_col = find(strcmp(vs_header,'HS17'));
+hs_2017_commodities = unique(hs_version_conc(:,stable_2017_col));
+
+[~,~,hs_version_year] = xlsread([conc_dir '/hs_version_year.xlsx']);
+
 % Stores
 hs_prematch = zeros(1,2+length(hs_2017_commodities));
 all_missing_cs = [];
@@ -47,28 +69,6 @@ for t = min(timeseries) : max(timeseries)
         trade = table2cell(T);
     
         clear T
-    
-        % Country concordances
-        [~,~,countries_iso_numeric] = xlsread([conc_dir '/countries-iso-numeric-m49-conc.xlsx']);
-        iso_code = cell2mat(countries_iso_numeric(2:end,2));
-        iso_alpha = countries_iso_numeric(2:end,3);
-    
-        [~,~,countries_iso_numeric] = xlsread([conc_dir '/reporters.xlsx']);
-        iso_code = cell2mat(countries_iso_numeric(2:end,3));
-        iso_alpha = countries_iso_numeric(2:end,7);
-    
-        country_acronyms = meta.root_country_legend(2:end,2);
-        assert(size(country_acronyms,1) == meta.n_reg_root_gl);
-    
-        % HS concordances
-        [~,~,hs_version_conc] = xlsread([conc_dir '/HS-SITC-BEC_Correlations_2022_bis.xlsx']);
-    
-        vs_header = hs_version_conc(1,1:7);
-        hs_version_conc = hs_version_conc(2:end-2,1:7);
-        stable_2017_col = find(strcmp(vs_header,'HS17'));
-        hs_2017_commodities = unique(hs_version_conc(:,stable_2017_col));
-    
-        [~,~,hs_version_year] = xlsread([conc_dir '/hs_version_year.xlsx']);
 
         missing_cs = {};
     
