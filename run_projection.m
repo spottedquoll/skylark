@@ -44,7 +44,6 @@ hs_2017_commodities = unique(hs_version_conc(:,stable_2017_col));
 
 % Stores
 hs_prematch = zeros(1,2+length(hs_2017_commodities));
-all_missing_cs = [];
 
 % Unpack by year
 for t = min(timeseries) : max(timeseries)
@@ -268,11 +267,14 @@ for t = min(timeseries) : max(timeseries)
                         % Value
                         if row{col_idx.value_fob} > 0 || row{col_idx.value_cif} > 0 
     
-                            candidates = [row{col_idx.value_fob} row{col_idx.value_cif}];
-                            nt_nan = find(~isnan(candidates));
-                            assert(length(nt_nan) == 1);
-    
-                            value = candidates(nt_nan);
+                            if flow_idx == 1
+                                value = row{col_idx.value_cif};
+                            elseif flow_idx == 2
+                                value = row{col_idx.value_fob};
+                            else
+                                error(['Unknown flow ' num2str(flow_idx)]);
+                            end
+
                             assert(~isnan(value) && isfinite(value) && value > 0);
     
                             vals(j,1) = value/n_matches;
@@ -329,7 +331,7 @@ for t = min(timeseries) : max(timeseries)
 
         trade_tensor.meta.edge_dims = edge_dims; 
         trade_tensor.meta.flows = flows;
-        trade_tensor.meta.edges = {'origin', 'destination', 'recorded_direction', 'commodity'};
+        trade_tensor.meta.edges = {'origin', 'destination', 'commodity', 'trade_flow'};
         trade_tensor.meta.units = {'$', 'kg'};
     
         % Write tensor to disk
@@ -339,15 +341,13 @@ for t = min(timeseries) : max(timeseries)
 
         % Log missing commodities
         disp(['Could not match: ' num2str(size(missing_cs,1)) ' records.']);
-        all_missing_cs = [all_missing_cs; unique(missing_cs)];
+
+        fname = [save_dir 'unmatched-hs-codes-' num2str(t) '.mat'];
+        save(fname,'missing_cs');
 
     end
 
 end
-
-% Write unmatched HS codes
-fname = [save_dir 'unmatched-hs-code.mat'];
-save(fname,'all_missing_cs');
 
 % Write matches shortcut
 fname = [conc_dir 'all-hs-matches.mat'];
