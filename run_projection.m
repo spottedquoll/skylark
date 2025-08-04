@@ -16,6 +16,7 @@ save_dir = meta.save_dir;
 
 % Settings
 flows = {'Import', 'Export'};
+trade_units = {'$_CIF', '$_FOB', 'kg'};
 timeseries = options.timeseries;
 comtrade_dir = options.env.comtrade_dir;
 base_classification = 'HS17';
@@ -122,14 +123,10 @@ for t = min(timeseries) : max(timeseries)
         % Store in a sparse array: {origin, destination, commodity, mode, recorded_direction}
         n_records = size(trade,1);
         guess_size = round(n_records*0.8);
-        edge_dims = [size(country_acronyms,1) ...
-            size(country_acronyms,1) ...
-            size(hs_2017_commodities,1) ...
-            size(flows,2)
-            ];
+        edge_dims = [size(country_acronyms,1), size(country_acronyms,1), size(hs_2017_commodities,1), size(flows,2), length(trade_units)];
     
         subs = zeros(guess_size,size(edge_dims,2)); 
-        vals = zeros(guess_size,2); 
+        vals = zeros(guess_size,1); 
     
         % Extract each line
         j = 1; logging = round(linspace(1,n_records,40));
@@ -255,40 +252,56 @@ for t = min(timeseries) : max(timeseries)
                         end
         
                         % Weight (kg)
-                        if row{col_idx.weight} > 0
+                        if ~isnan(row{col_idx.weight}) && row{col_idx.weight} > 0
                             
                             weight = row{col_idx.weight};
                             assert(~isnan(weight) && isfinite(weight) && weight > 0);
     
-                            vals(j,2) = weight/n_matches;
+                            vals(j) = weight/n_matches;
+                            unit = 3;
+                            new_entry(5) = unit;
+
+                            % Add to store
+                            assert(isempty(find(new_entry == 0, 1)),'Address vector is incomplete');
+                            subs(j,:) = new_entry;
+                            j = j + 1;    
     
                         end
                         
-                        % Value
+                        % Monetary value
                         if row{col_idx.value_fob} > 0 || row{col_idx.value_cif} > 0 
-    
+   
+                            value = -1;
                             if flow_idx == 1
-                                value = row{col_idx.value_cif};
-                            elseif flow_idx == 2
-                                value = row{col_idx.value_fob};
+                                if ~isnan(row{col_idx.value_cif}) && row{col_idx.value_cif} > 0 
+                                    value = row{col_idx.value_cif};
+                                    unit = 1;
+                                elseif ~isnan(row{col_idx.value_fob}) && row{col_idx.value_fob} > 0 
+                                    value = row{col_idx.value_fob};
+                                    unit = 2;
+                                end
+                            elseif flow_idx == 2 
+                                if ~isnan(row{col_idx.value_fob}) && row{col_idx.value_fob} > 0 
+                                    value = row{col_idx.value_fob};
+                                    unit = 2;
+                                end
                             else
                                 error(['Unknown flow ' num2str(flow_idx)]);
                             end
 
                             assert(~isnan(value) && isfinite(value) && value > 0);
+                            new_entry(5) = unit;
     
-                            vals(j,1) = value/n_matches;
+                            % Split by number of HS matches
+                            vals(j) = value/n_matches;
+
+                            % Add to store
+                            assert(isempty(find(new_entry == 0, 1)),'Address vector is incomplete');
+                            subs(j,:) = new_entry;
+                            j = j + 1;    
     
                         end
-        
-                        % Add to store
-                        assert(isempty(find(new_entry == 0, 1)),'Address vector is incomplete');
-                        assert(sum(vals(j,:)) > 0);
 
-                        subs(j,:) = new_entry;
-        
-                        j = j + 1;    
-        
                     end
 
                 end
@@ -326,13 +339,12 @@ for t = min(timeseries) : max(timeseries)
         assert(size(subs,2) == size(edge_dims,2));
     
         % Save as sparse tensor: {origin, destination, recorded_direction, commodity}
-        trade_tensor.value = sptensor(subs,vals(:,1),edge_dims); 
-        trade_tensor.weight = sptensor(subs,vals(:,2),edge_dims); 
+        trade_tensor.data = sptensor(subs,vals(:,1),edge_dims); 
 
         trade_tensor.meta.edge_dims = edge_dims; 
         trade_tensor.meta.flows = flows;
-        trade_tensor.meta.edges = {'origin', 'destination', 'commodity', 'trade_flow'};
-        trade_tensor.meta.units = {'$', 'kg'};
+        trade_tensor.meta.edges = {'origin', 'destination', 'commodity', 'flow', 'unit'};
+        trade_tensor.meta.units = {'$_CIF', '$_FOB', 'kg'};
     
         % Write tensor to disk
         disp('  writing to disk...');
