@@ -124,7 +124,7 @@ for t = min(timeseries) : max(timeseries)
     
         % Store in a sparse array: {origin, destination, commodity, mode, recorded_direction}
         n_records = size(trade,1);
-        guess_size = round(n_records*1.25);
+        guess_size = round(n_records*1.4);
         edge_dims = [size(country_acronyms,1), size(country_acronyms,1), size(hs_2017_commodities,1), size(flows,2), length(trade_units)];
     
         subs = zeros(guess_size,size(edge_dims,2)); 
@@ -346,12 +346,12 @@ for t = min(timeseries) : max(timeseries)
             
             % Log progress
             if ~isempty(find(logging == i, 1))
-                disp([' completed ' num2str(round(i/n_records*100)) '%']);
+                disp(['  completed ' num2str(round(i/n_records*100)) '%']);
             end
             
             % Check store size
             if j >= size(subs,1)
-                disp(['  expanding store size ' thousands_separated(size(subs,1)) ' -> ' thousands_separated(0.25*size(subs,1))]);
+                disp(['  expanding store size ' thousands_separated(size(subs,1)) ' -> ' thousands_separated(1.25*size(subs,1))]);
                 n_extra = round(0.25*size(subs,1));
                 subs = [subs; zeros(n_extra, size(subs,2))]; 
                 vals = [vals; zeros(n_extra, size(vals,2))];
