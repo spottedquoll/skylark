@@ -21,6 +21,8 @@ timeseries = options.timeseries;
 comtrade_dir = options.env.comtrade_dir;
 base_classification = 'HS17';
 
+%% Concordances
+
 % Country concordances
 [~,~,countries_iso_numeric] = xlsread([conc_dir '/countries-iso-numeric-m49-conc.xlsx']);
 iso_code = cell2mat(countries_iso_numeric(2:end,2));
@@ -46,7 +48,7 @@ hs_2017_commodities = unique(hs_version_conc(:,stable_2017_col));
 % Stores
 hs_prematch = zeros(1,2+length(hs_2017_commodities));
 
-% Unpack by year
+%% Unpack by year
 for t = min(timeseries) : max(timeseries)
 
     disp(['.unpacking ' num2str(t) '...']);
@@ -245,64 +247,98 @@ for t = min(timeseries) : max(timeseries)
                     end
 
                     % Write a fractional record for every HS match
-                    n_matches = size(c_idx_hs6,1);
+                    n_matches = size(c_idx_hs6,2);
+                    assert(size(c_idx_hs6,1) == 1);
 
-                    for k = 1:n_matches
-
-                        % Write HS index
-                        new_entry(3) = c_idx_hs6(k);
-        
-                        % Weight (kg)
-                        if ~isnan(row{col_idx.weight}) && row{col_idx.weight} > 0
-                            
-                            weight = row{col_idx.weight};
-                            assert(~isnan(weight) && isfinite(weight) && weight > 0);
-    
-                            vals(j) = weight/n_matches;
-                            unit = 3;
-                            new_entry(5) = unit;
-
-                            % Add to store
-                            assert(isempty(find(new_entry == 0, 1)),'Address vector is incomplete');
-                            subs(j,:) = new_entry;
-                            j = j + 1;    
-    
-                        end
+                    % Weight (kg)
+                    if ~isnan(row{col_idx.weight}) && row{col_idx.weight} > 0
                         
-                        % Monetary value
-                        if row{col_idx.value_fob} > 0 || row{col_idx.value_cif} > 0 
-   
-                            value = -1;
-                            if flow_idx == 1
-                                if ~isnan(row{col_idx.value_cif}) && row{col_idx.value_cif} > 0 
-                                    value = row{col_idx.value_cif};
-                                    unit = 1;
-                                elseif ~isnan(row{col_idx.value_fob}) && row{col_idx.value_fob} > 0 
-                                    value = row{col_idx.value_fob};
-                                    unit = 2;
-                                end
-                            elseif flow_idx == 2 
-                                if ~isnan(row{col_idx.value_fob}) && row{col_idx.value_fob} > 0 
-                                    value = row{col_idx.value_fob};
-                                    unit = 2;
-                                end
-                            else
-                                error(['Unknown flow ' num2str(flow_idx)]);
-                            end
+                        weight = row{col_idx.weight};
+                        assert(~isnan(weight) && isfinite(weight) && weight > 0);
 
-                            assert(~isnan(value) && isfinite(value) && value > 0);
-                            new_entry(5) = unit;
-    
-                            % Split by number of HS matches
-                            vals(j) = value/n_matches;
+                        new_entry(5) = 3;
+
+                        % Write one record or apportion over many
+                        if n_matches == 1
+
+                            % Build new record 
+                            new_entry(3) = c_idx_hs6;
 
                             % Add to store
                             assert(isempty(find(new_entry == 0, 1)),'Address vector is incomplete');
                             subs(j,:) = new_entry;
-                            j = j + 1;    
-    
+                            vals(j) = weight;
+                            j = j + 1;
+
+                        else
+
+                            % Build new record 
+                            new_entries = repmat(new_entry,n_matches,1);
+                            new_entries(:,3) = c_idx_hs6;
+                            val_vec = repmat(weight/n_matches,n_matches,1);
+
+                            assert(~any(new_entries(:) == 0),'Address vector is incomplete');
+
+                            % Add to store
+                            subs(j:j+n_matches-1,:) = new_entries;
+                            vals(j:j+n_matches-1) = val_vec;
+                            j = j + n_matches;
+
+                        end
+                    end
+
+                    % Monetary value
+                    if row{col_idx.value_fob} > 0 || row{col_idx.value_cif} > 0 
+
+                        % Unpack value field
+                        value = -1;
+                        if flow_idx == 1
+                            if ~isnan(row{col_idx.value_cif}) && row{col_idx.value_cif} > 0 
+                                value = row{col_idx.value_cif};
+                                unit = 1;
+                            elseif ~isnan(row{col_idx.value_fob}) && row{col_idx.value_fob} > 0 
+                                value = row{col_idx.value_fob};
+                                unit = 2;
+                            end
+                        elseif flow_idx == 2 
+                            if ~isnan(row{col_idx.value_fob}) && row{col_idx.value_fob} > 0 
+                                value = row{col_idx.value_fob};
+                                unit = 2;
+                            end
+                        else
+                            error(['Unknown flow ' num2str(flow_idx)]);
                         end
 
+                        assert(~isnan(value) && isfinite(value) && value > 0);
+                        new_entry(5) = unit;
+
+                        % Write one record or apportion over many
+                        if n_matches == 1
+
+                            % Build new record 
+                            new_entry(3) = c_idx_hs6;
+
+                            % Add to store
+                            assert(isempty(find(new_entry == 0, 1)),'Address vector is incomplete');
+                            subs(j,:) = new_entry;
+                            vals(j) = weight;
+                            j = j + 1;
+
+                        else
+
+                            % Build new record 
+                            new_entries = repmat(new_entry,n_matches,1);
+                            new_entries(:,3) = c_idx_hs6;
+                            val_vec = repmat(value/n_matches,n_matches,1);
+
+                            assert(~any(new_entries(:) == 0),'Address vector is incomplete');
+
+                            % Add to store
+                            subs(j:j+n_matches-1,:) = new_entries;
+                            vals(j:j+n_matches-1) = val_vec;
+                            j = j + n_matches;
+
+                        end
                     end
 
                 end
@@ -322,8 +358,6 @@ for t = min(timeseries) : max(timeseries)
             end
                                 
         end
-    
-        disp('  finished extracting Comtrade data.');
     
         clear trade
     
@@ -362,6 +396,8 @@ for t = min(timeseries) : max(timeseries)
     end
 
 end
+
+%% Finish
 
 % Write matches shortcut
 fname = [conc_dir 'all-hs-matches.mat'];
