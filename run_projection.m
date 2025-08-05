@@ -16,6 +16,7 @@ save_dir = meta.save_dir;
 
 % Settings
 flows = {'Import', 'Export'};
+trade_units = {'$_CIF', '$_FOB', 'kg'};
 timeseries = options.timeseries;
 comtrade_dir = options.env.comtrade_dir;
 base_classification = 'HS17';
@@ -44,7 +45,6 @@ hs_2017_commodities = unique(hs_version_conc(:,stable_2017_col));
 
 % Stores
 hs_prematch = zeros(1,2+length(hs_2017_commodities));
-all_missing_cs = [];
 
 % Unpack by year
 for t = min(timeseries) : max(timeseries)
@@ -122,15 +122,11 @@ for t = min(timeseries) : max(timeseries)
     
         % Store in a sparse array: {origin, destination, commodity, mode, recorded_direction}
         n_records = size(trade,1);
-        guess_size = round(n_records*0.8);
-        edge_dims = [size(country_acronyms,1) ...
-            size(country_acronyms,1) ...
-            size(hs_2017_commodities,1) ...
-            size(flows,2)
-            ];
+        guess_size = round(n_records*1.25);
+        edge_dims = [size(country_acronyms,1), size(country_acronyms,1), size(hs_2017_commodities,1), size(flows,2), length(trade_units)];
     
         subs = zeros(guess_size,size(edge_dims,2)); 
-        vals = zeros(guess_size,2); 
+        vals = zeros(guess_size,1); 
     
         % Extract each line
         j = 1; logging = round(linspace(1,n_records,40));
@@ -239,6 +235,16 @@ for t = min(timeseries) : max(timeseries)
                     missing_cs = [missing_cs; [hs6_code ' (' row{col_idx.hs_version} ')']];
                 else
 
+                    % Populate new record                    
+                    if strcmp(fl,'Import')
+                        new_entry(1) = partner_idx;
+                        new_entry(2) = reporter_idx;
+                    elseif strcmp(fl,'Export')
+                        new_entry(1) = reporter_idx;
+                        new_entry(2) = partner_idx;
+                    end
+
+                    % Write a fractional record for every HS match
                     n_matches = size(c_idx_hs6,1);
 
                     for k = 1:n_matches
@@ -246,47 +252,57 @@ for t = min(timeseries) : max(timeseries)
                         % Write HS index
                         new_entry(3) = c_idx_hs6(k);
         
-                        % Populate new record                    
-                        if strcmp(fl,'Import')
-                            new_entry(1) = partner_idx;
-                            new_entry(2) = reporter_idx;
-                        elseif strcmp(fl,'Export')
-                            new_entry(1) = reporter_idx;
-                            new_entry(2) = partner_idx;
-                        end
-        
                         % Weight (kg)
-                        if row{col_idx.weight} > 0
+                        if ~isnan(row{col_idx.weight}) && row{col_idx.weight} > 0
                             
                             weight = row{col_idx.weight};
                             assert(~isnan(weight) && isfinite(weight) && weight > 0);
     
-                            vals(j,2) = weight/n_matches;
+                            vals(j) = weight/n_matches;
+                            unit = 3;
+                            new_entry(5) = unit;
+
+                            % Add to store
+                            assert(isempty(find(new_entry == 0, 1)),'Address vector is incomplete');
+                            subs(j,:) = new_entry;
+                            j = j + 1;    
     
                         end
                         
-                        % Value
+                        % Monetary value
                         if row{col_idx.value_fob} > 0 || row{col_idx.value_cif} > 0 
-    
-                            candidates = [row{col_idx.value_fob} row{col_idx.value_cif}];
-                            nt_nan = find(~isnan(candidates));
-                            assert(length(nt_nan) == 1);
-    
-                            value = candidates(nt_nan);
+   
+                            value = -1;
+                            if flow_idx == 1
+                                if ~isnan(row{col_idx.value_cif}) && row{col_idx.value_cif} > 0 
+                                    value = row{col_idx.value_cif};
+                                    unit = 1;
+                                elseif ~isnan(row{col_idx.value_fob}) && row{col_idx.value_fob} > 0 
+                                    value = row{col_idx.value_fob};
+                                    unit = 2;
+                                end
+                            elseif flow_idx == 2 
+                                if ~isnan(row{col_idx.value_fob}) && row{col_idx.value_fob} > 0 
+                                    value = row{col_idx.value_fob};
+                                    unit = 2;
+                                end
+                            else
+                                error(['Unknown flow ' num2str(flow_idx)]);
+                            end
+
                             assert(~isnan(value) && isfinite(value) && value > 0);
+                            new_entry(5) = unit;
     
-                            vals(j,1) = value/n_matches;
+                            % Split by number of HS matches
+                            vals(j) = value/n_matches;
+
+                            % Add to store
+                            assert(isempty(find(new_entry == 0, 1)),'Address vector is incomplete');
+                            subs(j,:) = new_entry;
+                            j = j + 1;    
     
                         end
-        
-                        % Add to store
-                        assert(isempty(find(new_entry == 0, 1)),'Address vector is incomplete');
-                        assert(sum(vals(j,:)) > 0);
 
-                        subs(j,:) = new_entry;
-        
-                        j = j + 1;    
-        
                     end
 
                 end
@@ -299,7 +315,8 @@ for t = min(timeseries) : max(timeseries)
             
             % Check store size
             if j >= size(subs,1)
-                n_extra = round(0.2*size(subs,1));
+                disp(['  expanding store size ' thousands_separated(size(subs,1)) ' -> ' thousands_separated(0.25*size(subs,1))]);
+                n_extra = round(0.25*size(subs,1));
                 subs = [subs; zeros(n_extra, size(subs,2))]; 
                 vals = [vals; zeros(n_extra, size(vals,2))];
             end
@@ -324,13 +341,12 @@ for t = min(timeseries) : max(timeseries)
         assert(size(subs,2) == size(edge_dims,2));
     
         % Save as sparse tensor: {origin, destination, recorded_direction, commodity}
-        trade_tensor.value = sptensor(subs,vals(:,1),edge_dims); 
-        trade_tensor.weight = sptensor(subs,vals(:,2),edge_dims); 
+        trade_tensor.data = sptensor(subs,vals(:,1),edge_dims); 
 
         trade_tensor.meta.edge_dims = edge_dims; 
         trade_tensor.meta.flows = flows;
-        trade_tensor.meta.edges = {'origin', 'destination', 'recorded_direction', 'commodity'};
-        trade_tensor.meta.units = {'$', 'kg'};
+        trade_tensor.meta.edges = {'origin', 'destination', 'commodity', 'flow', 'unit'};
+        trade_tensor.meta.units = {'$_CIF', '$_FOB', 'kg'};
     
         % Write tensor to disk
         disp('  writing to disk...');
@@ -339,15 +355,13 @@ for t = min(timeseries) : max(timeseries)
 
         % Log missing commodities
         disp(['Could not match: ' num2str(size(missing_cs,1)) ' records.']);
-        all_missing_cs = [all_missing_cs; unique(missing_cs)];
+
+        fname = [save_dir 'unmatched-hs-codes-' num2str(t) '.mat'];
+        save(fname,'missing_cs');
 
     end
 
 end
-
-% Write unmatched HS codes
-fname = [save_dir 'unmatched-hs-code.mat'];
-save(fname,'all_missing_cs');
 
 % Write matches shortcut
 fname = [conc_dir 'all-hs-matches.mat'];
