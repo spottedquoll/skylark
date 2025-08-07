@@ -20,6 +20,7 @@ trade_units = {'$_CIF', '$_FOB', 'kg'};
 timeseries = options.timeseries;
 comtrade_dir = options.env.comtrade_dir;
 base_classification = 'HS17';
+prealloc_guess = round(n_records*2);
 
 %% Concordances
 
@@ -51,7 +52,7 @@ hs_prematch = zeros(1,2+length(hs_2017_commodities));
 %% Unpack by year
 for t = min(timeseries) : max(timeseries)
 
-    disp(['.unpacking ' num2str(t) '...']);
+    disp([' unpacking ' num2str(t) '...']);
 
     % Read from cache or build from scratch
     save_fname = [save_dir 'comtrade-tensor-' base_classification '-' num2str(t) '.mat'];
@@ -124,11 +125,10 @@ for t = min(timeseries) : max(timeseries)
     
         % Store in a sparse array: {origin, destination, commodity, mode, recorded_direction}
         n_records = size(trade,1);
-        guess_size = round(n_records*1.4);
         edge_dims = [size(country_acronyms,1), size(country_acronyms,1), size(hs_2017_commodities,1), size(flows,2), length(trade_units)];
     
-        subs = zeros(guess_size,size(edge_dims,2)); 
-        vals = zeros(guess_size,1); 
+        subs = zeros(prealloc_guess,size(edge_dims,2)); 
+        vals = zeros(prealloc_guess,1); 
     
         % Extract each line
         j = 1; logging = round(linspace(1,n_records,40));
@@ -367,7 +367,7 @@ for t = min(timeseries) : max(timeseries)
         if j < size(subs,1)
             subs(j:end,:) = [];
             vals(j:end,:) = [];
-            disp(['  pre-allocation guess: ' ThousandSep(guess_size) ', final size: ' ThousandSep(j)]);
+            disp(['  pre-allocation guess: ' ThousandSep(prealloc_guess) ', final size: ' ThousandSep(j)]);
         end
     
         assert(all_finite(vals) && all_positive(vals));
