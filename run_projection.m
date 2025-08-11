@@ -20,7 +20,7 @@ trade_units = {'$_CIF', '$_FOB', 'kg'};
 timeseries = options.timeseries;
 comtrade_dir = options.env.comtrade_dir;
 base_classification = 'HS17';
-prealloc_guess = round(n_records*2);
+prealloc_guess = round(n_records*3);
 
 %% Concordances
 
@@ -73,7 +73,9 @@ for t = min(timeseries) : max(timeseries)
     
         clear T
 
+        % Log stores
         missing_cs = {};
+        missing_countries = [];
     
         % Define column names 
         col_names = [{'classificationCode', 'hs_version'}; ...
@@ -98,12 +100,13 @@ for t = min(timeseries) : max(timeseries)
         % Filter records
         n_raw = size(trade,1);
     
-        tmp = cell2mat(trade(:,[col_idx.value_fob col_idx.value_cif col_idx.weight]));
+        tmp = cell2mat(trade(:,[col_idx.value_fob col_idx.value_cif col_idx.weight col_idx.reporter_code col_idx.partner_code]));
 
         a = union(union(find(~isnan(tmp(:,1))), find(~isnan(tmp(:,2)))), find(~isnan(tmp(:,3))));
         b = union(find(strcmp(trade(:,col_idx.flow),'X')),find(strcmp(trade(:,col_idx.flow),'M')));
         c = union(union(find(tmp(:,1) > 0), find(tmp(:,2) > 0)), find(tmp(:,3) > 0));
-        d = intersect(intersect(a,b),c);
+        g = intersect(find(tmp(:,4) > 0), find(tmp(:,5) > 0));
+        d = intersect(intersect(a,b),intersect(c,g));
     
         e = find(ismember(header,col_names(:,1)));
     
@@ -132,7 +135,6 @@ for t = min(timeseries) : max(timeseries)
     
         % Extract each line
         j = 1; logging = round(linspace(1,n_records,40));
-        missing_countries = {};
     
         for i = 1:n_records
     
@@ -145,7 +147,9 @@ for t = min(timeseries) : max(timeseries)
                 reporter_alpha = iso_alpha(find(iso_code == row{col_idx.reporter_code}));
                 reporter_idx = find(strcmp(reporter_alpha, country_acronyms));
             catch
-                missing_countries = [missing_countries; row(col_idx.reporter_code)];
+                if ~ismember(row{col_idx.reporter_code},missing_countries)
+                    missing_countries = [missing_countries; row{col_idx.reporter_code}];
+                end
             end
     
             partner_idx = [];
@@ -153,7 +157,9 @@ for t = min(timeseries) : max(timeseries)
                 partner_alpha = iso_alpha(find(iso_code == row{col_idx.partner_code}));
                 partner_idx = find(strcmp(partner_alpha, country_acronyms));
             catch
-                missing_countries = [missing_countries; row(col_idx.partner_code)];
+                if ~ismember(row{col_idx.partner_code},missing_countries)
+                    missing_countries = [missing_countries; row{col_idx.partner_code}];
+                end
             end
     
             if ~isempty(reporter_idx) && ~isempty(partner_idx)
@@ -309,35 +315,37 @@ for t = min(timeseries) : max(timeseries)
                             error(['Unknown flow ' num2str(flow_idx)]);
                         end
 
-                        assert(~isnan(value) && isfinite(value) && value > 0);
+                        assert(~isnan(value) && isfinite(value));
                         new_entry(5) = unit;
 
                         % Write one record or apportion over many
-                        if n_matches == 1
-
-                            % Build new record 
-                            new_entry(3) = c_idx_hs6;
-
-                            % Add to store
-                            assert(isempty(find(new_entry == 0, 1)),'Address vector is incomplete');
-                            subs(j,:) = new_entry;
-                            vals(j) = weight;
-                            j = j + 1;
-
-                        else
-
-                            % Build new record 
-                            new_entries = repmat(new_entry,n_matches,1);
-                            new_entries(:,3) = c_idx_hs6;
-                            val_vec = repmat(value/n_matches,n_matches,1);
-
-                            assert(~any(new_entries(:) == 0),'Address vector is incomplete');
-
-                            % Add to store
-                            subs(j:j+n_matches-1,:) = new_entries;
-                            vals(j:j+n_matches-1) = val_vec;
-                            j = j + n_matches;
-
+                        if value > 0
+                            if n_matches == 1
+    
+                                % Build new record 
+                                new_entry(3) = c_idx_hs6;
+    
+                                % Add to store
+                                assert(isempty(find(new_entry == 0, 1)),'Address vector is incomplete');
+                                subs(j,:) = new_entry;
+                                vals(j) = weight;
+                                j = j + 1;
+    
+                            else
+    
+                                % Build new record 
+                                new_entries = repmat(new_entry,n_matches,1);
+                                new_entries(:,3) = c_idx_hs6;
+                                val_vec = repmat(value/n_matches,n_matches,1);
+    
+                                assert(~any(new_entries(:) == 0),'Address vector is incomplete');
+    
+                                % Add to store
+                                subs(j:j+n_matches-1,:) = new_entries;
+                                vals(j:j+n_matches-1) = val_vec;
+                                j = j + n_matches;
+    
+                            end
                         end
                     end
 
