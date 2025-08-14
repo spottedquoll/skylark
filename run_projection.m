@@ -20,7 +20,6 @@ trade_units = {'$_CIF', '$_FOB', 'kg'};
 timeseries = options.timeseries;
 comtrade_dir = options.env.comtrade_dir;
 base_classification = 'HS17';
-prealloc_guess = round(n_records*3);
 
 %% Concordances
 
@@ -129,7 +128,7 @@ for t = min(timeseries) : max(timeseries)
         % Store in a sparse array: {origin, destination, commodity, mode, recorded_direction}
         n_records = size(trade,1);
         edge_dims = [size(country_acronyms,1), size(country_acronyms,1), size(hs_2017_commodities,1), size(flows,2), length(trade_units)];
-    
+        prealloc_guess = round(n_records*3);
         subs = zeros(prealloc_guess,size(edge_dims,2)); 
         vals = zeros(prealloc_guess,1); 
     
