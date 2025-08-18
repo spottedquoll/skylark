@@ -11,8 +11,14 @@ addpath(genpath(current_dir));
 options = json_parser([current_dir 'config.json']);
 meta = initialise_environment(options);
 
+% Paths
 conc_dir = meta.conc_dir;
 save_dir = meta.save_dir;
+
+diagnostics_dir = [options.env.comtrade_dir 'diagnostics/'];
+if ~isfolder(save_dir)
+    mkdir(save_dir);
+end
 
 % Settings
 flows = {'Import', 'Export'};
@@ -395,10 +401,16 @@ for t = min(timeseries) : max(timeseries)
         save(save_fname, 'trade_tensor', '-v7.3');
 
         % Log missing commodities
-        disp(['Could not match: ' num2str(size(missing_cs,1)) ' records.']);
+        disp(['  could not match: ' num2str(size(missing_cs,1)) ' records.']);
 
-        fname = [save_dir 'unmatched-hs-codes-' num2str(t) '.mat'];
+        fname = [diagnostics_dir 'unmatched-hs-codes-' num2str(t) '.mat'];
         save(fname,'missing_cs');
+
+        % Log missing commodities
+        disp(['  could not match: ' num2str(size(missing_countries,1)) ' countries.']);
+
+        fname = [diagnostics_dir 'unmatched-countries-' num2str(t) '.xlsx'];
+        save(missing_countries,fname);
 
     end
 
